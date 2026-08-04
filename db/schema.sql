@@ -366,7 +366,8 @@ CREATE TABLE schools (
 
     id BIGSERIAL PRIMARY KEY,
 
-    public_id UUID NOT NULL
+    public_id UUID 
+        NOT NULL
         DEFAULT gen_random_uuid()
         UNIQUE,
 
@@ -391,16 +392,19 @@ CREATE TABLE schools (
     education_phase VARCHAR(100),
 
 
-
     -- -------------------------------------------------------------------------
     -- Contact Information
     -- -------------------------------------------------------------------------
 
-    email VARCHAR(255),
+    email VARCHAR(255)
+        CHECK (
+            email IS NULL
+            OR trim(email) <> ''
+        ),
 
     phone VARCHAR(30),
 
-    website VARCHAR(255),
+    website VARCHAR(500),
 
 
 
@@ -420,7 +424,9 @@ CREATE TABLE schools (
 
     postal_code VARCHAR(20),
 
-    country VARCHAR(100) DEFAULT 'South Africa',
+    country VARCHAR(100)
+        NOT NULL
+        DEFAULT 'South Africa',
 
 
 
@@ -431,8 +437,6 @@ CREATE TABLE schools (
     status school_status
         NOT NULL
         DEFAULT 'ACTIVE',
-
-
 
     -- -------------------------------------------------------------------------
     -- Audit Information
@@ -456,6 +460,21 @@ CREATE TABLE schools (
 
 );
 
+-- =============================================================================
+-- INDEXES: schools
+-- =============================================================================
+
+CREATE INDEX idx_schools_name
+ON schools (school_name);
+
+CREATE INDEX idx_schools_status
+ON schools (status);
+
+CREATE INDEX idx_schools_city
+ON schools (city);
+
+CREATE INDEX idx_schools_province
+ON schools (province);
 
 
 -- =============================================================================
@@ -1064,6 +1083,10 @@ CREATE TABLE guardians (
 
 );
 
+-- Mentor Relationship
+-- References another teacher who acts as the mentor.
+mentor_id BIGINT,
+
 CREATE TABLE teachers (
 
     id BIGSERIAL PRIMARY KEY,
@@ -1075,6 +1098,8 @@ CREATE TABLE teachers (
     user_id BIGINT NOT NULL,
 
     school_id BIGINT NOT NULL,
+
+    mentor_id BIGINT,
 
     employee_number VARCHAR(50)
         UNIQUE,
@@ -1097,7 +1122,12 @@ CREATE TABLE teachers (
 
     CONSTRAINT fk_teacher_school
         FOREIGN KEY (school_id)
-        REFERENCES schools(id)
+        REFERENCES schools(id),
+
+    CONSTRAINT fk_teacher_mentor
+    FOREIGN KEY (mentor_id)
+    REFERENCES teachers(id)
+    ON DELETE SET NULL
 
 );
 
@@ -1556,13 +1586,17 @@ CREATE TABLE attendance_entries (
         REFERENCES learners(id)
         ON DELETE CASCADE,
 
+    recorded_by BIGINT,
+
+    CONSTRAINT fk_entry_recorded_by
+        FOREIGN KEY (recorded_by)
+        REFERENCES users(id),
+
     CONSTRAINT uq_session_learner
         UNIQUE (
             attendance_session_id,
             learner_id
-        )
-
-        recorded_by BIGINT,
+    )
 
     CONSTRAINT fk_entry_recorded_by
         FOREIGN KEY (recorded_by)
