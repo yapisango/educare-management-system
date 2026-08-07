@@ -6,14 +6,19 @@
 -- edge_random_gender()
 --
 -- Purpose:
--- Returns a random gender.
+-- Returns a random gender value.
 --
--- Safe to rerun.
+-- Values:
+-- Male
+-- Female
+--
+-- Example:
+-- SELECT edge_random_gender();
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION edge_random_gender()
 
-RETURNS gender
+RETURNS VARCHAR
 
 LANGUAGE sql
 
@@ -21,27 +26,24 @@ AS
 $$
 
 SELECT
-
-CASE
-
-    WHEN random() < 0.5
-
-    THEN 'MALE'::gender
-
-    ELSE 'FEMALE'::gender
-
-END;
+(
+    ARRAY[
+        'Male',
+        'Female'
+    ]
+)[
+    FLOOR(random() * 2 + 1)::INTEGER
+];
 
 $$;
 
 -- ============================================================================
--- Test
+-- Tests
 -- ============================================================================
 
 SELECT edge_random_gender();
 
 SELECT
-
     edge_random_gender(),
     edge_random_gender(),
     edge_random_gender(),

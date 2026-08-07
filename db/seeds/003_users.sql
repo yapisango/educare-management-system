@@ -2,35 +2,27 @@
 -- EduCare Management System
 -- EDGE (EduCare Data Generator Engine)
 -- ----------------------------------------------------------------------------
--- Seed: 003_users.sql
+-- Seed: 002_users.sql
 --
--- Purpose:
--- Generates realistic demo people using the EDGE random generators.
+-- Purpose
+-- --------
+-- Generates realistic demo users for the EduCare Management System.
 --
--- Dependencies:
---   enums.sql
---   schema.sql
---   generator_first_names
---   generator_last_names
---   generator_addresses
---   generator_email_domains
---   generator_phone_prefixes
---   generator_companies
---
--- Safe to rerun.
+-- This script is safe to rerun.
 -- ============================================================================
+--
 
 BEGIN;
 
--- ----------------------------------------------------------
--- Remove existing demo data
--- ----------------------------------------------------------
+-- ============================================================================
+-- Remove existing users
+-- ============================================================================
 
-DELETE FROM users;
+TRUNCATE TABLE users RESTART IDENTITY CASCADE;
 
--- ----------------------------------------------------------
--- Generate 1000 users
--- ----------------------------------------------------------
+-- ============================================================================
+-- Generate Demo Users
+-- ============================================================================
 
 INSERT INTO users
 (
@@ -38,10 +30,15 @@ INSERT INTO users
     last_name,
     email,
     phone,
+    date_of_birth,
+    gender,
+    username,
     password_hash,
     role,
-    account_status
+    last_login,
+    is_active
 )
+
 SELECT
 
     fn.first_name,
@@ -50,24 +47,81 @@ SELECT
 
     LOWER(
         fn.first_name || '.' ||
-        ln.last_name || gs.i || '@' ||
+        ln.last_name ||
+        LPAD(gs.i::TEXT,3,'0')
+        || '@' ||
         edge_random_email_domain()
     ),
 
     edge_random_phone_number(),
 
-    '$2b$12$CHANGE_THIS_TO_A_REAL_BCRYPT_HASH',
-
     CASE
-        WHEN gs.i <= 1 THEN 'PRINCIPAL'::user_role
-        WHEN gs.i <= 5 THEN 'ADMIN'::user_role
-        WHEN gs.i <= 85 THEN 'TEACHER'::user_role
-        WHEN gs.i <= 110 THEN 'STAFF'::user_role
-        WHEN gs.i <= 910 THEN 'LEARNER'::user_role
-        ELSE 'PARENT'::user_role
+
+        WHEN gs.i = 1
+            THEN edge_random_birth_date(40,65)
+
+        WHEN gs.i <= 5
+            THEN edge_random_birth_date(28,60)
+
+        WHEN gs.i <= 85
+            THEN edge_random_birth_date(24,65)
+
+        WHEN gs.i <= 110
+            THEN edge_random_birth_date(22,60)
+
+        WHEN gs.i <= 910
+            THEN edge_random_birth_date(13,18)
+
+        ELSE
+            edge_random_birth_date(28,70)
+
     END,
 
-    'ACTIVE'::account_status
+    edge_random_gender(),
+
+    edge_random_username
+    (
+        fn.first_name,
+        ln.last_name,
+        gs.i
+    ),
+
+    '$2b$12$CHANGE_THIS_WITH_REAL_BCRYPT_HASH',
+
+    CASE
+
+        WHEN gs.i = 1
+            THEN 'PRINCIPAL'::user_role
+
+        WHEN gs.i <= 5
+            THEN 'ADMIN'::user_role
+
+        WHEN gs.i <= 85
+            THEN 'TEACHER'::user_role
+
+        WHEN gs.i <= 110
+            THEN 'STAFF'::user_role
+
+        WHEN gs.i <= 910
+            THEN 'LEARNER'::user_role
+
+        ELSE
+            'PARENT'::user_role
+
+    END,
+
+    CASE
+
+        WHEN random() < 0.10
+            THEN NULL
+
+        ELSE
+            NOW() -
+            (random() * INTERVAL '30 days')
+
+    END,
+
+    TRUE
 
 FROM generate_series(1,1000) gs(i)
 
@@ -90,6 +144,16 @@ COMMIT;
 SELECT COUNT(*) AS total_users
 FROM users;
 
-SELECT *
+SELECT role, COUNT(*)
+FROM users
+GROUP BY role
+ORDER BY role;
+
+SELECT
+    id,
+    username,
+    first_name,
+    last_name,
+    role
 FROM users
 LIMIT 20;
