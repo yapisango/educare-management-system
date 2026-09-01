@@ -37,7 +37,7 @@ CREATE TABLE generator_addresses
 -- Generate 1 000 Addresses
 -- ============================================================================
 
-INSERT INTO generator_addresses
+INSERT INTO public.generator_addresses
 (
     house_number,
     street_name,
@@ -45,34 +45,24 @@ INSERT INTO generator_addresses
     province,
     postal_code
 )
-
 SELECT
-
     FLOOR(random() * 999 + 1)::INTEGER,
-
     edge_random_street(),
-
-    city,
-
-    province,
-
-    postal_code
-
-FROM
+    c.city,
+    c.province,
+    c.postal_code
+FROM generate_series(1, 1000) AS gs(n)
+CROSS JOIN LATERAL
 (
     SELECT
-
         city,
         province,
         postal_code
-
-    FROM generator_cities
-
-    ORDER BY random()
-
-    LIMIT 1000
-
-) AS cities;
+    FROM public.generator_cities
+    WHERE is_active = TRUE
+    ORDER BY random() + (gs.n * 0)
+    LIMIT 1
+) AS c;
 
 COMMIT;
 

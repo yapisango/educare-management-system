@@ -20,17 +20,17 @@ INSERT INTO schools
     phone,
     address,
     principal_name,
-    school_status
+    is_active
 )
 
 SELECT
     'EduCare High School',
     'ECHS001',
     'info@educare.co.za',
-    '+27 11 555 1234',
-    '123 Main Road, Johannesburg, Gauteng, South Africa',
+    '0115551234',
+    '123 Main Road, Johannesburg',
     'Mr John Smith',
-    'ACTIVE'
+    TRUE
 
 WHERE NOT EXISTS
 (
@@ -47,9 +47,12 @@ SELECT
     id,
     school_name,
     school_code,
+    email,
+    phone,
+    address,
     principal_name,
-    school_status
+    is_active
 FROM schools
-ORDER BY id;
+WHERE school_code = 'ECHS001';
 
 COMMIT;
