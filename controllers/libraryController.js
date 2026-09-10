@@ -93,3 +93,66 @@ export const getBookById = async (req, res) => {
         });
     }
 };
+
+export const getMembers = async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT
+                lm.id,
+                lm.public_id,
+                lm.membership_number,
+                lm.membership_type,
+                lm.membership_date,
+                lm.expiry_date,
+                lm.max_books,
+                lm.status,
+
+                u.id AS user_id,
+                u.public_id AS user_public_id,
+                u.first_name,
+                u.last_name,
+                u.email,
+                u.phone,
+
+                l.id AS learner_id,
+                l.learner_number,
+
+                e.id AS employee_id,
+                e.employee_number,
+
+                g.id AS guardian_id,
+                g.relationship_to_learner
+
+            FROM public.library_members lm
+
+            INNER JOIN public.users u
+                ON u.id = lm.user_id
+
+            LEFT JOIN public.learners l
+                ON l.id = lm.learner_id
+
+            LEFT JOIN public.employees e
+                ON e.id = lm.employee_id
+
+            LEFT JOIN public.guardians g
+                ON g.id = lm.guardian_id
+
+            WHERE lm.is_active = TRUE
+            ORDER BY lm.id;
+        `);
+
+        res.status(200).json({
+            success: true,
+            message: "Library members retrieved successfully.",
+            data: result.rows
+        });
+    } catch (error) {
+        console.error("Failed to retrieve library members:", error);
+
+        res.status(500).json({
+            success: false,
+            message: "Failed to retrieve library members.",
+            errors: []
+        });
+    }
+};
