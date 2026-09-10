@@ -1,5 +1,6 @@
 import express from "express";
 import pool from "./config/database.js";
+import libraryRoutes from "./routes/libraryRoutes.js";
 
 const app = express();
 
@@ -8,6 +9,8 @@ const PORT = process.env.PORT || 8000;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static("public"));
+
+app.use("/api/v1/library", libraryRoutes);
 
 app.get("/api/health", async (req, res) => {
     try {
