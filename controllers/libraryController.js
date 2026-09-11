@@ -156,3 +156,90 @@ export const getMembers = async (req, res) => {
         });
     }
 };
+
+export const getLoans = async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT
+                ll.id,
+                ll.public_id,
+                ll.school_id,
+                ll.loan_date,
+                ll.due_date,
+                ll.returned_date,
+                ll.status,
+                ll.renewal_count,
+                ll.notes,
+
+                bc.id AS book_copy_id,
+                bc.public_id AS book_copy_public_id,
+                bc.copy_number,
+                bc.barcode,
+                bc.condition AS copy_condition,
+                bc.status AS copy_status,
+                bc.shelf_location,
+
+                b.id AS book_id,
+                b.public_id AS book_public_id,
+                b.isbn,
+                b.title,
+                b.author,
+
+                lm.id AS library_member_id,
+                lm.public_id AS library_member_public_id,
+                lm.membership_number,
+                lm.membership_type,
+
+                member_user.id AS member_user_id,
+                member_user.first_name AS member_first_name,
+                member_user.last_name AS member_last_name,
+                member_user.email AS member_email,
+
+                issued_user.id AS issued_by_user_id,
+                issued_user.first_name AS issued_by_first_name,
+                issued_user.last_name AS issued_by_last_name,
+
+                returned_user.id AS returned_to_user_id,
+                returned_user.first_name AS returned_to_first_name,
+                returned_user.last_name AS returned_to_last_name
+
+            FROM public.library_loans ll
+
+            INNER JOIN public.book_copies bc
+                ON bc.id = ll.book_copy_id
+
+            INNER JOIN public.books b
+                ON b.id = bc.book_id
+
+            INNER JOIN public.library_members lm
+                ON lm.id = ll.library_member_id
+
+            INNER JOIN public.users member_user
+                ON member_user.id = lm.user_id
+
+            LEFT JOIN public.users issued_user
+                ON issued_user.id = ll.issued_by
+
+            LEFT JOIN public.users returned_user
+                ON returned_user.id = ll.returned_to
+
+            WHERE ll.is_active = TRUE
+
+            ORDER BY ll.id;
+        `);
+
+        res.status(200).json({
+            success: true,
+            message: "Library loans retrieved successfully.",
+            data: result.rows
+        });
+    } catch (error) {
+        console.error("Failed to retrieve library loans:", error);
+
+        res.status(500).json({
+            success: false,
+            message: "Failed to retrieve library loans.",
+            errors: []
+        });
+    }
+};
