@@ -243,3 +243,84 @@ export const getLoans = async (req, res) => {
         });
     }
 };
+
+export const getFines = async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT
+                lf.id,
+                lf.public_id,
+                lf.school_id,
+                lf.fine_type,
+                lf.amount,
+                lf.amount_paid,
+                lf.issued_date,
+                lf.paid_date,
+                lf.status,
+                lf.description,
+
+                ll.id AS loan_id,
+                ll.public_id AS loan_public_id,
+                ll.loan_date,
+                ll.due_date,
+                ll.returned_date,
+                ll.status AS loan_status,
+
+                bc.id AS book_copy_id,
+                bc.public_id AS book_copy_public_id,
+                bc.copy_number,
+                bc.barcode,
+
+                b.id AS book_id,
+                b.public_id AS book_public_id,
+                b.isbn,
+                b.title,
+                b.author,
+
+                lm.id AS library_member_id,
+                lm.public_id AS library_member_public_id,
+                lm.membership_number,
+                lm.membership_type,
+
+                member_user.id AS member_user_id,
+                member_user.first_name AS member_first_name,
+                member_user.last_name AS member_last_name,
+                member_user.email AS member_email
+
+            FROM public.library_fines lf
+
+            INNER JOIN public.library_loans ll
+                ON ll.id = lf.loan_id
+
+            INNER JOIN public.book_copies bc
+                ON bc.id = ll.book_copy_id
+
+            INNER JOIN public.books b
+                ON b.id = bc.book_id
+
+            INNER JOIN public.library_members lm
+                ON lm.id = lf.library_member_id
+
+            INNER JOIN public.users member_user
+                ON member_user.id = lm.user_id
+
+            WHERE lf.is_active = TRUE
+
+            ORDER BY lf.id;
+        `);
+
+        res.status(200).json({
+            success: true,
+            message: "Library fines retrieved successfully.",
+            data: result.rows
+        });
+    } catch (error) {
+        console.error("Failed to retrieve library fines:", error);
+
+        res.status(500).json({
+            success: false,
+            message: "Failed to retrieve library fines.",
+            errors: []
+        });
+    }
+};
