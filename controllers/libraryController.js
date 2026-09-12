@@ -324,3 +324,206 @@ export const getFines = async (req, res) => {
         });
     }
 };
+
+export const createLoan = async (req, res) => {
+    const client = await pool.connect();
+
+    try {
+        const {
+            book_copy_id,
+            library_member_id,
+            due_date,
+            issued_by
+        } = req.body;
+
+        if (!book_copy_id || !library_member_id || !due_date) {
+            return res.status(400).json({
+                success: false,
+                message: "book_copy_id, library_member_id and due_date are required.",
+                errors: []
+            });
+        }
+
+        await client.query("BEGIN");
+
+        // Lock and validate the library member.
+        const memberResult = await client.query(`
+            SELECT
+                id,
+                school_id,
+                max_books,
+                status,
+                expiry_date
+            FROM public.library_members
+            WHERE id = $1
+              AND is_active = TRUE
+            FOR UPDATE;
+        `, [library_member_id]);
+
+        if (memberResult.rows.length === 0) {
+            await client.query("ROLLBACK");
+
+            return res.status(404).json({
+                success: false,
+                message: "Library member not found.",
+                errors: []
+            });
+        }
+
+        const member = memberResult.rows[0];
+
+        if (member.status !== "ACTIVE") {
+            await client.query("ROLLBACK");
+
+            return res.status(400).json({
+                success: false,
+                message: "Library member is not active.",
+                errors: []
+            });
+        }
+
+        if (
+            member.expiry_date &&
+            new Date(member.expiry_date) < new Date()
+        ) {
+            await client.query("ROLLBACK");
+
+            return res.status(400).json({
+                success: false,
+                message: "Library membership has expired.",
+                errors: []
+            });
+        }
+
+        // Check the member's current active loan count.
+        const loanCountResult = await client.query(`
+            SELECT COUNT(*)::integer AS active_loans
+            FROM public.library_loans
+            WHERE library_member_id = $1
+              AND is_active = TRUE
+              AND returned_date IS NULL
+              AND status IN ('BORROWED', 'OVERDUE', 'LOST');
+        `, [library_member_id]);
+
+        const activeLoans = loanCountResult.rows[0].active_loans;
+
+        if (activeLoans >= member.max_books) {
+            await client.query("ROLLBACK");
+
+            return res.status(400).json({
+                success: false,
+                message: "Library member has reached the maximum number of active loans.",
+                errors: []
+            });
+        }
+
+        // Lock and validate the physical book copy.
+        const copyResult = await client.query(`
+            SELECT
+                id,
+                book_id,
+                school_id,
+                status,
+                is_active
+            FROM public.book_copies
+            WHERE id = $1
+              AND is_active = TRUE
+            FOR UPDATE;
+        `, [book_copy_id]);
+
+        if (copyResult.rows.length === 0) {
+            await client.query("ROLLBACK");
+
+            return res.status(404).json({
+                success: false,
+                message: "Book copy not found.",
+                errors: []
+            });
+        }
+
+        const copy = copyResult.rows[0];
+
+        if (copy.school_id !== member.school_id) {
+            await client.query("ROLLBACK");
+
+            return res.status(400).json({
+                success: false,
+                message: "Book copy and library member belong to different schools.",
+                errors: []
+            });
+        }
+
+        if (copy.status !== "AVAILABLE") {
+            await client.query("ROLLBACK");
+
+            return res.status(400).json({
+                success: false,
+                message: "Book copy is not available for loan.",
+                errors: []
+            });
+        }
+
+        // Create the loan.
+        const loanResult = await client.query(`
+            INSERT INTO public.library_loans (
+                school_id,
+                book_copy_id,
+                library_member_id,
+                due_date,
+                status,
+                issued_by
+            )
+            VALUES ($1, $2, $3, $4, 'BORROWED', $5)
+            RETURNING
+                id,
+                public_id,
+                school_id,
+                book_copy_id,
+                library_member_id,
+                loan_date,
+                due_date,
+                status,
+                renewal_count,
+                issued_by;
+        `, [
+            member.school_id,
+            book_copy_id,
+            library_member_id,
+            due_date,
+            issued_by || null
+        ]);
+
+        // Mark the physical copy as being on loan.
+        await client.query(`
+            UPDATE public.book_copies
+            SET
+                status = 'ON_LOAN',
+                updated_at = NOW()
+            WHERE id = $1;
+        `, [book_copy_id]);
+
+        await client.query("COMMIT");
+
+        res.status(201).json({
+            success: true,
+            message: "Book loan created successfully.",
+            data: loanResult.rows[0]
+        });
+    } catch (error) {
+        try {
+            await client.query("ROLLBACK");
+        } catch (rollbackError) {
+            console.error("Loan transaction rollback failed:", rollbackError);
+        }
+
+        console.error("Failed to create library loan:", error);
+
+        res.status(500).json({
+            success: false,
+            message: "Failed to create library loan.",
+            errors: []
+        });
+    } finally {
+        client.release();
+    }
+};
