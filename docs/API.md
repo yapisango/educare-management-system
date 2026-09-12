@@ -45,7 +45,7 @@ The EduCare API follows these principles:
 Development
 
 ```
-http://localhost:3000/api/v1
+http://localhost:8000/api/v1
 ```
 
 Production
@@ -295,10 +295,89 @@ POST /assessments
 PUT /assessments/:id
 DELETE /assessments/:id
 ```
-
 ---
 
-# 19. Finance Endpoints
+# 19. Library Endpoints
+
+The Library API provides access to books, library members, loans, and fines.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /library/books | List active library books |
+| GET | /library/books/:id | Retrieve an active library book by ID |
+| GET | /library/members | List active library members |
+| GET | /library/loans | List active library loans |
+| GET | /library/fines | List active library fines |
+
+## 19.1 List Books
+
+```http
+GET /library/books
+```
+
+## 19.2 Get Book by ID
+
+```http
+GET /library/books/:id
+```
+
+If the book does not exist:
+
+```
+404 Not Found
+```
+
+## 19.3 List Library Members
+
+```http
+GET /library/members
+```
+
+Returns active library members together with their associated user and identity information.
+
+## 19.4 List Library Loans
+
+```http
+GET /library/loans
+```
+
+Returns active library loans, including:
+
+- Book copy information
+- Book information
+- Library member information
+- Issuing user
+- Returning user
+- Loan status
+- Loan and due dates
+
+## 19.5 List Library Fines
+
+```http
+GET /library/fines
+```
+
+Returns active library fines, including:
+
+- Fine information
+- Related loan
+- Book copy
+- Book information
+- Library member
+- Fine status
+- Amount and payment information
+
+All currently implemented Library endpoints are available under:
+
+/api/v1/library
+
+Example:
+
+```http
+GET /api/v1/library/books
+```
+
+# 20. Finance Endpoints
 
 Payments
 
@@ -326,7 +405,7 @@ PUT /fees/:id
 
 ---
 
-# 20. Notification Endpoints
+# 21. Notification Endpoints
 
 ```
 GET /notifications
@@ -336,7 +415,7 @@ PUT /notifications/:id
 
 ---
 
-# 21. Search API
+# 22. Search API
 
 Global Search
 
@@ -352,7 +431,7 @@ GET /search?q=Grade 8
 
 ---
 
-# 22. Pagination
+# 23. Pagination
 
 List endpoints support pagination.
 
@@ -376,7 +455,7 @@ Response
 
 ---
 
-# 23. Filtering
+# 24. Filtering
 
 Example
 
@@ -394,7 +473,7 @@ GET /payments?status=paid
 
 ---
 
-# 24. Sorting
+# 25. Sorting
 
 ```
 GET /learners?sort=name
@@ -406,7 +485,7 @@ GET /learners?sort=-createdAt
 
 ---
 
-# 25. Rate Limiting
+# 26. Rate Limiting
 
 To protect the platform, the API implements request throttling.
 
@@ -424,7 +503,7 @@ Excessive requests return
 
 ---
 
-# 26. Security
+# 27. Security
 
 Security measures include:
 
@@ -440,7 +519,7 @@ Security measures include:
 
 ---
 
-# 27. Error Handling
+# 28. Error Handling
 
 Errors always return a structured response.
 
@@ -456,7 +535,7 @@ Example
 
 ---
 
-# 28. API Documentation Standards
+# 29. API Documentation Standards
 
 All endpoints should include:
 
@@ -471,7 +550,7 @@ All endpoints should include:
 
 ---
 
-# 29. Future API Enhancements
+# 30. Future API Enhancements
 
 Future versions may include:
 
@@ -486,7 +565,7 @@ Future versions may include:
 
 ---
 
-# 30. API Design Standards
+# 31. API Design Standards
 
 The EduCare API follows the engineering standards defined in the YapiTech Engineering Handbook.
 
