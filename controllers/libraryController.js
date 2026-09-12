@@ -244,86 +244,6 @@ export const getLoans = async (req, res) => {
     }
 };
 
-export const getFines = async (req, res) => {
-    try {
-        const result = await pool.query(`
-            SELECT
-                lf.id,
-                lf.public_id,
-                lf.school_id,
-                lf.fine_type,
-                lf.amount,
-                lf.amount_paid,
-                lf.issued_date,
-                lf.paid_date,
-                lf.status,
-                lf.description,
-
-                ll.id AS loan_id,
-                ll.public_id AS loan_public_id,
-                ll.loan_date,
-                ll.due_date,
-                ll.returned_date,
-                ll.status AS loan_status,
-
-                bc.id AS book_copy_id,
-                bc.public_id AS book_copy_public_id,
-                bc.copy_number,
-                bc.barcode,
-
-                b.id AS book_id,
-                b.public_id AS book_public_id,
-                b.isbn,
-                b.title,
-                b.author,
-
-                lm.id AS library_member_id,
-                lm.public_id AS library_member_public_id,
-                lm.membership_number,
-                lm.membership_type,
-
-                member_user.id AS member_user_id,
-                member_user.first_name AS member_first_name,
-                member_user.last_name AS member_last_name,
-                member_user.email AS member_email
-
-            FROM public.library_fines lf
-
-            INNER JOIN public.library_loans ll
-                ON ll.id = lf.loan_id
-
-            INNER JOIN public.book_copies bc
-                ON bc.id = ll.book_copy_id
-
-            INNER JOIN public.books b
-                ON b.id = bc.book_id
-
-            INNER JOIN public.library_members lm
-                ON lm.id = lf.library_member_id
-
-            INNER JOIN public.users member_user
-                ON member_user.id = lm.user_id
-
-            WHERE lf.is_active = TRUE
-
-            ORDER BY lf.id;
-        `);
-
-        res.status(200).json({
-            success: true,
-            message: "Library fines retrieved successfully.",
-            data: result.rows
-        });
-    } catch (error) {
-        console.error("Failed to retrieve library fines:", error);
-
-        res.status(500).json({
-            success: false,
-            message: "Failed to retrieve library fines.",
-            errors: []
-        });
-    }
-};
 
 export const createLoan = async (req, res) => {
     const client = await pool.connect();
@@ -525,5 +445,229 @@ export const createLoan = async (req, res) => {
         });
     } finally {
         client.release();
+    }
+};
+
+export const returnLoan = async (req, res) => {
+    const client = await pool.connect();
+
+    try {
+        const { id } = req.params;
+        const { returned_to } = req.body;
+
+        await client.query("BEGIN");
+
+        // Lock and find the active loan.
+        const loanResult = await client.query(`
+            SELECT
+                id,
+                school_id,
+                book_copy_id,
+                library_member_id,
+                loan_date,
+                due_date,
+                returned_date,
+                status
+            FROM public.library_loans
+            WHERE id = $1
+              AND is_active = TRUE
+            FOR UPDATE;
+        `, [id]);
+
+        if (loanResult.rows.length === 0) {
+            await client.query("ROLLBACK");
+
+            return res.status(404).json({
+                success: false,
+                message: "Library loan not found.",
+                errors: []
+            });
+        }
+
+        const loan = loanResult.rows[0];
+
+        // A loan that already has a returned date cannot be returned again.
+        if (loan.returned_date !== null || loan.status === "RETURNED") {
+            await client.query("ROLLBACK");
+
+            return res.status(400).json({
+                success: false,
+                message: "Library loan has already been returned.",
+                errors: []
+            });
+        }
+
+        // Lock the physical book copy.
+        const copyResult = await client.query(`
+            SELECT
+                id,
+                school_id,
+                status,
+                is_active
+            FROM public.book_copies
+            WHERE id = $1
+              AND is_active = TRUE
+            FOR UPDATE;
+        `, [loan.book_copy_id]);
+
+        if (copyResult.rows.length === 0) {
+            await client.query("ROLLBACK");
+
+            return res.status(404).json({
+                success: false,
+                message: "Book copy associated with this loan was not found.",
+                errors: []
+            });
+        }
+
+        const copy = copyResult.rows[0];
+
+        if (copy.school_id !== loan.school_id) {
+            await client.query("ROLLBACK");
+
+            return res.status(400).json({
+                success: false,
+                message: "Book copy and loan belong to different schools.",
+                errors: []
+            });
+        }
+
+        // Return the loan and record the return user.
+        const returnedLoanResult = await client.query(`
+            UPDATE public.library_loans
+            SET
+                returned_date = CURRENT_DATE,
+                status = 'RETURNED',
+                returned_to = $2,
+                updated_at = NOW()
+            WHERE id = $1
+            RETURNING
+                id,
+                public_id,
+                school_id,
+                book_copy_id,
+                library_member_id,
+                loan_date,
+                due_date,
+                returned_date,
+                status,
+                renewal_count,
+                issued_by,
+                returned_to;
+        `, [id, returned_to || null]);
+
+        // Make the physical copy available again.
+        await client.query(`
+            UPDATE public.book_copies
+            SET
+                status = 'AVAILABLE',
+                updated_at = NOW()
+            WHERE id = $1;
+        `, [loan.book_copy_id]);
+
+        await client.query("COMMIT");
+
+        res.status(200).json({
+            success: true,
+            message: "Book loan returned successfully.",
+            data: returnedLoanResult.rows[0]
+        });
+    } catch (error) {
+        try {
+            await client.query("ROLLBACK");
+        } catch (rollbackError) {
+            console.error("Loan return transaction rollback failed:", rollbackError);
+        }
+
+        console.error("Failed to return library loan:", error);
+
+        res.status(500).json({
+            success: false,
+            message: "Failed to return library loan.",
+            errors: []
+        });
+    } finally {
+        client.release();
+    }
+};
+
+export const getFines = async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT
+                lf.id,
+                lf.public_id,
+                lf.school_id,
+                lf.fine_type,
+                lf.amount,
+                lf.amount_paid,
+                lf.issued_date,
+                lf.paid_date,
+                lf.status,
+                lf.description,
+
+                ll.id AS loan_id,
+                ll.public_id AS loan_public_id,
+                ll.loan_date,
+                ll.due_date,
+                ll.returned_date,
+                ll.status AS loan_status,
+
+                bc.id AS book_copy_id,
+                bc.public_id AS book_copy_public_id,
+                bc.copy_number,
+                bc.barcode,
+
+                b.id AS book_id,
+                b.public_id AS book_public_id,
+                b.isbn,
+                b.title,
+                b.author,
+
+                lm.id AS library_member_id,
+                lm.public_id AS library_member_public_id,
+                lm.membership_number,
+                lm.membership_type,
+
+                member_user.id AS member_user_id,
+                member_user.first_name AS member_first_name,
+                member_user.last_name AS member_last_name,
+                member_user.email AS member_email
+
+            FROM public.library_fines lf
+
+            INNER JOIN public.library_loans ll
+                ON ll.id = lf.loan_id
+
+            INNER JOIN public.book_copies bc
+                ON bc.id = ll.book_copy_id
+
+            INNER JOIN public.books b
+                ON b.id = bc.book_id
+
+            INNER JOIN public.library_members lm
+                ON lm.id = lf.library_member_id
+
+            INNER JOIN public.users member_user
+                ON member_user.id = lm.user_id
+
+            WHERE lf.is_active = TRUE
+
+            ORDER BY lf.id;
+        `);
+
+        res.status(200).json({
+            success: true,
+            message: "Library fines retrieved successfully.",
+            data: result.rows
+        });
+    } catch (error) {
+        console.error("Failed to retrieve library fines:", error);
+
+        res.status(500).json({
+            success: false,
+            message: "Failed to retrieve library fines.",
+            errors: []
+        });
     }
 };
