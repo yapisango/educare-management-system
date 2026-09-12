@@ -229,6 +229,15 @@ Core domains include:
 - Assessment
 - Finance
 - Communication
+- Library
+
+The Library domain manages:
+
+- Books
+- Book Copies
+- Library Members
+- Library Loans
+- Library Fines
 
 Each domain owns its own business rules.
 
