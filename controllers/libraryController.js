@@ -671,3 +671,226 @@ export const getFines = async (req, res) => {
         });
     }
 };
+
+export const createFine = async (req, res) => {
+    const client = await pool.connect();
+
+    try {
+        const {
+            loan_id,
+            fine_type,
+            amount,
+            description,
+            created_by
+        } = req.body;
+
+        if (!loan_id || !fine_type || amount === undefined) {
+            return res.status(400).json({
+                success: false,
+                message: "loan_id, fine_type and amount are required.",
+                errors: []
+            });
+        }
+
+        const allowedFineTypes = [
+            "OVERDUE",
+            "LOST_BOOK",
+            "DAMAGED_BOOK",
+            "OTHER"
+        ];
+
+        if (!allowedFineTypes.includes(fine_type)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid fine type.",
+                errors: []
+            });
+        }
+
+        const numericAmount = Number(amount);
+
+        if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Fine amount must be greater than zero.",
+                errors: []
+            });
+        }
+
+        await client.query("BEGIN");
+
+        // Lock and validate the loan.
+        const loanResult = await client.query(`
+            SELECT
+                id,
+                school_id,
+                library_member_id,
+                status,
+                returned_date
+            FROM public.library_loans
+            WHERE id = $1
+              AND is_active = TRUE
+            FOR UPDATE;
+        `, [loan_id]);
+
+        if (loanResult.rows.length === 0) {
+            await client.query("ROLLBACK");
+
+            return res.status(404).json({
+                success: false,
+                message: "Library loan not found.",
+                errors: []
+            });
+        }
+
+        const loan = loanResult.rows[0];
+
+        // Verify the library member belongs to the loan.
+        const memberResult = await client.query(`
+            SELECT
+                id,
+                school_id,
+                status,
+                is_active
+            FROM public.library_members
+            WHERE id = $1
+              AND is_active = TRUE
+            FOR UPDATE;
+        `, [loan.library_member_id]);
+
+        if (memberResult.rows.length === 0) {
+            await client.query("ROLLBACK");
+
+            return res.status(404).json({
+                success: false,
+                message: "Library member associated with this loan was not found.",
+                errors: []
+            });
+        }
+
+        const member = memberResult.rows[0];
+
+        if (member.school_id !== loan.school_id) {
+            await client.query("ROLLBACK");
+
+            return res.status(400).json({
+                success: false,
+                message: "Library loan and member belong to different schools.",
+                errors: []
+            });
+        }
+
+        if (member.status !== "ACTIVE") {
+            await client.query("ROLLBACK");
+
+            return res.status(400).json({
+                success: false,
+                message: "Library member is not active.",
+                errors: []
+            });
+        }
+
+        // An overdue fine must be attached to an overdue loan.
+        if (fine_type === "OVERDUE" && loan.status !== "OVERDUE") {
+            await client.query("ROLLBACK");
+
+            return res.status(400).json({
+                success: false,
+                message: "An overdue fine can only be created for an overdue loan.",
+                errors: []
+            });
+        }
+
+        // Prevent multiple active fines for the same loan.
+        const existingFineResult = await client.query(`
+            SELECT id
+            FROM public.library_fines
+            WHERE loan_id = $1
+              AND is_active = TRUE
+              AND status <> 'WAIVED'
+            LIMIT 1;
+        `, [loan_id]);
+
+        if (existingFineResult.rows.length > 0) {
+            await client.query("ROLLBACK");
+
+            return res.status(409).json({
+                success: false,
+                message: "An active fine already exists for this library loan.",
+                errors: []
+            });
+        }
+
+        // Create the fine.
+        const fineResult = await client.query(`
+            INSERT INTO public.library_fines (
+                school_id,
+                loan_id,
+                library_member_id,
+                fine_type,
+                amount,
+                amount_paid,
+                status,
+                description,
+                created_by
+            )
+            VALUES (
+                $1,
+                $2,
+                $3,
+                $4,
+                $5,
+                0,
+                'OUTSTANDING',
+                $6,
+                $7
+            )
+            RETURNING
+                id,
+                public_id,
+                school_id,
+                loan_id,
+                library_member_id,
+                fine_type,
+                amount,
+                amount_paid,
+                issued_date,
+                paid_date,
+                status,
+                description,
+                created_by;
+        `, [
+            loan.school_id,
+            loan.id,
+            loan.library_member_id,
+            fine_type,
+            numericAmount,
+            description || null,
+            created_by || null
+        ]);
+
+        await client.query("COMMIT");
+
+        res.status(201).json({
+            success: true,
+            message: "Library fine created successfully.",
+            data: fineResult.rows[0]
+        });
+    } catch (error) {
+        try {
+            await client.query("ROLLBACK");
+        } catch (rollbackError) {
+            console.error("Fine transaction rollback failed:", rollbackError);
+        }
+
+        console.error("Failed to create library fine:", error);
+
+        res.status(500).json({
+            success: false,
+            message: "Failed to create library fine.",
+            errors: []
+        });
+    } finally {
+        client.release();
+    }
+};

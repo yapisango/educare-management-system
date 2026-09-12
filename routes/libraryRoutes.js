@@ -1,5 +1,5 @@
 import express from "express";
-import { getBooks, getBookById, getMembers, getLoans, getFines, createLoan, returnLoan } from "../controllers/libraryController.js";
+import { getBooks, getBookById, getMembers, getLoans, getFines, createLoan, returnLoan, createFine } from "../controllers/libraryController.js";
 
 const router = express.Router();
 
@@ -10,5 +10,6 @@ router.get("/loans", getLoans);
 router.post("/loans", createLoan);
 router.post("/loans/:id/return", returnLoan);
 router.get("/fines", getFines);
+router.post("/fines", createFine);
 
 export default router;
