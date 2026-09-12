@@ -894,3 +894,170 @@ export const createFine = async (req, res) => {
         client.release();
     }
 };
+
+export const payFine = async (req, res) => {
+    const client = await pool.connect();
+
+    try {
+        const fineId = Number(req.params.id);
+        const { amount, updated_by } = req.body;
+
+        if (!Number.isInteger(fineId) || fineId <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid fine ID.",
+                errors: []
+            });
+        }
+
+        if (amount === undefined) {
+            return res.status(400).json({
+                success: false,
+                message: "Payment amount is required.",
+                errors: []
+            });
+        }
+
+        const paymentAmount = Number(amount);
+
+        if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Payment amount must be greater than zero.",
+                errors: []
+            });
+        }
+
+        await client.query("BEGIN");
+
+        // Lock the fine so concurrent payments cannot overpay it.
+        const fineResult = await client.query(`
+            SELECT
+                id,
+                school_id,
+                loan_id,
+                library_member_id,
+                fine_type,
+                amount,
+                amount_paid,
+                issued_date,
+                paid_date,
+                status,
+                description
+            FROM public.library_fines
+            WHERE id = $1
+              AND is_active = TRUE
+            FOR UPDATE;
+        `, [fineId]);
+
+        if (fineResult.rows.length === 0) {
+            await client.query("ROLLBACK");
+
+            return res.status(404).json({
+                success: false,
+                message: "Library fine not found.",
+                errors: []
+            });
+        }
+
+        const fine = fineResult.rows[0];
+
+        if (fine.status === "PAID") {
+            await client.query("ROLLBACK");
+
+            return res.status(400).json({
+                success: false,
+                message: "Library fine has already been fully paid.",
+                errors: []
+            });
+        }
+
+        if (fine.status === "WAIVED") {
+            await client.query("ROLLBACK");
+
+            return res.status(400).json({
+                success: false,
+                message: "A waived library fine cannot be paid.",
+                errors: []
+            });
+        }
+
+        const fineAmount = Number(fine.amount);
+        const currentAmountPaid = Number(fine.amount_paid);
+        const remainingAmount = fineAmount - currentAmountPaid;
+
+        if (paymentAmount > remainingAmount) {
+            await client.query("ROLLBACK");
+
+            return res.status(400).json({
+                success: false,
+                message: `Payment amount exceeds the remaining fine balance of R${remainingAmount.toFixed(2)}.`,
+                errors: []
+            });
+        }
+
+        const newAmountPaid = currentAmountPaid + paymentAmount;
+        const isFullyPaid = newAmountPaid === fineAmount;
+
+        const updateResult = await client.query(`
+            UPDATE public.library_fines
+            SET
+                amount_paid = $1,
+                status = $2,
+                paid_date = $3,
+                updated_by = $4,
+                updated_at = NOW()
+            WHERE id = $5
+            RETURNING
+                id,
+                public_id,
+                school_id,
+                loan_id,
+                library_member_id,
+                fine_type,
+                amount,
+                amount_paid,
+                issued_date,
+                paid_date,
+                status,
+                description,
+                updated_by,
+                updated_at;
+        `, [
+            newAmountPaid,
+            isFullyPaid ? "PAID" : "PARTIALLY_PAID",
+            isFullyPaid ? new Date() : null,
+            updated_by || null,
+            fineId
+        ]);
+
+        await client.query("COMMIT");
+
+        res.status(200).json({
+            success: true,
+            message: isFullyPaid
+                ? "Library fine paid successfully."
+                : "Library fine payment recorded successfully.",
+            data: updateResult.rows[0]
+        });
+    } catch (error) {
+        try {
+            await client.query("ROLLBACK");
+        } catch (rollbackError) {
+            console.error(
+                "Fine payment transaction rollback failed:",
+                rollbackError
+            );
+        }
+
+        console.error("Failed to pay library fine:", error);
+
+        res.status(500).json({
+            success: false,
+            message: "Failed to process library fine payment.",
+            errors: []
+        });
+    } finally {
+        client.release();
+    }
+};
