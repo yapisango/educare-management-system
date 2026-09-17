@@ -591,6 +591,192 @@ export const returnLoan = async (req, res) => {
     }
 };
 
+export const renewLoan = async (req, res) => {
+    const client = await pool.connect();
+
+    try {
+        const loanId = Number(req.params.id);
+        const { new_due_date, updated_by } = req.body;
+
+        if (!Number.isInteger(loanId) || loanId <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid loan ID.",
+                errors: []
+            });
+        }
+
+        if (!new_due_date) {
+            return res.status(400).json({
+                success: false,
+                message: "new_due_date is required.",
+                errors: []
+            });
+        }
+
+        await client.query("BEGIN");
+
+        // Lock the loan so concurrent renewals cannot update it incorrectly.
+        const loanResult = await client.query(`
+            SELECT
+                id,
+                school_id,
+                book_copy_id,
+                library_member_id,
+                loan_date,
+                due_date,
+                returned_date,
+                status,
+                renewal_count
+            FROM public.library_loans
+            WHERE id = $1
+              AND is_active = TRUE
+            FOR UPDATE;
+        `, [loanId]);
+
+        if (loanResult.rows.length === 0) {
+            await client.query("ROLLBACK");
+
+            return res.status(404).json({
+                success: false,
+                message: "Library loan not found.",
+                errors: []
+            });
+        }
+
+        const loan = loanResult.rows[0];
+
+        // Only an active borrowed loan may be renewed.
+        if (loan.status !== "BORROWED") {
+            await client.query("ROLLBACK");
+
+            return res.status(400).json({
+                success: false,
+                message: "Only a borrowed library loan can be renewed.",
+                errors: []
+            });
+        }
+
+        if (loan.returned_date !== null) {
+            await client.query("ROLLBACK");
+
+            return res.status(400).json({
+                success: false,
+                message: "A returned library loan cannot be renewed.",
+                errors: []
+            });
+        }
+
+        // Validate the new due date against the current due date.
+        const currentDueDate = String(loan.due_date).slice(0, 10);
+        const requestedDueDate = String(new_due_date).trim();
+
+        const validDateFormat = /^\d{4}-\d{2}-\d{2}$/;
+
+        if (!validDateFormat.test(requestedDueDate)) {
+            await client.query("ROLLBACK");
+
+            return res.status(400).json({
+                success: false,
+                message: "Invalid new due date.",
+                errors: []
+            });
+        }
+
+        const [year, month, day] = requestedDueDate.split("-").map(Number);
+        const dateCheck = new Date(Date.UTC(year, month - 1, day));
+
+        const isRealCalendarDate =
+            dateCheck.getUTCFullYear() === year &&
+            dateCheck.getUTCMonth() === month - 1 &&
+            dateCheck.getUTCDate() === day;
+
+        if (!isRealCalendarDate) {
+            await client.query("ROLLBACK");
+
+            return res.status(400).json({
+                success: false,
+                message: "Invalid new due date.",
+                errors: []
+            });
+        }
+
+        const dateComparisonResult = await client.query(`
+            SELECT ($1::date > due_date) AS is_later
+            FROM public.library_loans
+            WHERE id = $2
+            AND is_active = TRUE;
+        `, [requestedDueDate, loanId]);
+
+        if (!dateComparisonResult.rows[0].is_later) {
+            await client.query("ROLLBACK");
+
+            return res.status(400).json({
+                success: false,
+                message: "New due date must be later than the current due date.",
+                errors: []
+            });
+        }
+
+        // Update the loan.
+        const updatedLoanResult = await client.query(`
+            UPDATE public.library_loans
+            SET
+                due_date = $1,
+                renewal_count = renewal_count + 1,
+                updated_by = $2,
+                updated_at = NOW()
+            WHERE id = $3
+            RETURNING
+                id,
+                public_id,
+                school_id,
+                book_copy_id,
+                library_member_id,
+                loan_date,
+                due_date,
+                returned_date,
+                status,
+                renewal_count,
+                issued_by,
+                returned_to,
+                updated_by,
+                updated_at;
+        `, [
+            requestedDueDate,
+            updated_by || null,
+            loanId
+        ]);
+
+        await client.query("COMMIT");
+
+        res.status(200).json({
+            success: true,
+            message: "Library loan renewed successfully.",
+            data: updatedLoanResult.rows[0]
+        });
+    } catch (error) {
+        try {
+            await client.query("ROLLBACK");
+        } catch (rollbackError) {
+            console.error(
+                "Loan renewal transaction rollback failed:",
+                rollbackError
+            );
+        }
+
+        console.error("Failed to renew library loan:", error);
+
+        res.status(500).json({
+            success: false,
+            message: "Failed to renew library loan.",
+            errors: []
+        });
+    } finally {
+        client.release();
+    }
+};
+
 export const getFines = async (req, res) => {
     try {
         const result = await pool.query(`
