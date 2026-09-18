@@ -113,6 +113,48 @@ try {
         );
     }
 
+        // Attempt to loan the same physical copy again.
+    const duplicateLoanResponse = await fetch(
+        "http://localhost:8000/api/v1/library/loans",
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                book_copy_id: createdCopyId,
+                library_member_id: memberId,
+                due_date: "2026-10-20",
+                issued_by: 1
+            })
+        }
+    );
+
+    const duplicateLoanBody = await duplicateLoanResponse.json();
+
+    if (duplicateLoanResponse.status !== 400) {
+        throw new Error(
+            `Expected duplicate loan attempt to return HTTP 400, but received ${duplicateLoanResponse.status}`
+        );
+    }
+
+    if (
+        duplicateLoanBody.message !==
+        "Book copy is not available for loan."
+    ) {
+        throw new Error(
+            `Expected unavailable-copy message, but received "${duplicateLoanBody.message}"`
+        );
+    }
+
+    if (duplicateLoanBody.success !== false) {
+        throw new Error(
+            "Expected duplicate loan attempt success flag to be false."
+        );
+    }
+
+    console.log("Unavailable-copy protection: PASSED");
+
     console.log("Library loan creation API test passed");
     console.log(`Created loan ID: ${createdLoanId}`);
     console.log(`Book copy: ${createdCopyId}`);
