@@ -263,6 +263,47 @@ export const createLoan = async (req, res) => {
                 errors: []
             });
         }
+        // Validate due date before starting the transaction.
+        const dueDateText = String(due_date).trim();
+
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDateText)) {
+            return res.status(400).json({
+                success: false,
+                message: "due_date must be in YYYY-MM-DD format.",
+                errors: []
+            });
+        }
+
+        const [year, month, day] = dueDateText.split("-").map(Number);
+        const dueDateObject = new Date(
+            Date.UTC(year, month - 1, day)
+        );
+
+        if (
+            dueDateObject.getUTCFullYear() !== year ||
+            dueDateObject.getUTCMonth() !== month - 1 ||
+            dueDateObject.getUTCDate() !== day
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "due_date must be a valid calendar date.",
+                errors: []
+            });
+        }
+
+        const todayResult = await pool.query(`
+            SELECT CURRENT_DATE::text AS current_date;
+        `);
+
+        const currentDate = todayResult.rows[0].current_date;
+
+        if (dueDateText < currentDate) {
+            return res.status(400).json({
+                success: false,
+                message: "Due date cannot be earlier than the loan date.",
+                errors: []
+            });
+        }
 
         await client.query("BEGIN");
 

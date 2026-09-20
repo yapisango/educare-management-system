@@ -43,6 +43,116 @@ try {
 
     const memberId = Number(memberResult.rows[0].id);
 
+    // Validate invalid due-date formats before creating the real test loan.
+
+    const invalidFormatResponse = await fetch(
+        "http://localhost:8000/api/v1/library/loans",
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                book_copy_id: createdCopyId,
+                library_member_id: memberId,
+                due_date: "2026/10/12",
+                issued_by: 1
+            })
+        }
+    );
+
+    const invalidFormatBody = await invalidFormatResponse.json();
+
+    if (invalidFormatResponse.status !== 400) {
+        throw new Error(
+            `Expected invalid due-date format to return HTTP 400, but received ${invalidFormatResponse.status}`
+        );
+    }
+
+    if (
+        invalidFormatBody.message !==
+        "due_date must be in YYYY-MM-DD format."
+    ) {
+        throw new Error(
+            `Unexpected invalid-format message: "${invalidFormatBody.message}"`
+        );
+    }
+
+    console.log("Invalid due-date format protection: PASSED");
+
+    // Validate impossible calendar dates.
+
+    const invalidCalendarResponse = await fetch(
+        "http://localhost:8000/api/v1/library/loans",
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                book_copy_id: createdCopyId,
+                library_member_id: memberId,
+                due_date: "2026-02-30",
+                issued_by: 1
+            })
+        }
+    );
+
+    const invalidCalendarBody = await invalidCalendarResponse.json();
+
+    if (invalidCalendarResponse.status !== 400) {
+        throw new Error(
+            `Expected invalid calendar date to return HTTP 400, but received ${invalidCalendarResponse.status}`
+        );
+    }
+
+    if (
+        invalidCalendarBody.message !==
+        "due_date must be a valid calendar date."
+    ) {
+        throw new Error(
+            `Unexpected invalid-calendar message: "${invalidCalendarBody.message}"`
+        );
+    }
+
+    console.log("Invalid calendar-date protection: PASSED");
+
+    // Validate dates earlier than the loan date.
+
+    const pastDateResponse = await fetch(
+        "http://localhost:8000/api/v1/library/loans",
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                book_copy_id: createdCopyId,
+                library_member_id: memberId,
+                due_date: "2020-01-01",
+                issued_by: 1
+            })
+        }
+    );
+
+    const pastDateBody = await pastDateResponse.json();
+
+    if (pastDateResponse.status !== 400) {
+        throw new Error(
+            `Expected past due date to return HTTP 400, but received ${pastDateResponse.status}`
+        );
+    }
+
+    if (
+        pastDateBody.message !==
+        "Due date cannot be earlier than the loan date."
+    ) {
+        throw new Error(
+            `Unexpected past-date message: "${pastDateBody.message}"`
+        );
+    }
+
+    console.log("Past due-date protection: PASSED");
     // Create the loan through the API.
     const response = await fetch(
         "http://localhost:8000/api/v1/library/loans",
